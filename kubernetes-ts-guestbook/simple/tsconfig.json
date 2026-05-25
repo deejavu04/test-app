@@ -1,21 +1,16 @@
 {
     "compilerOptions": {
-        // Output
-        "outDir": "bin",
-        "sourceMap": true,
-        // Environment
-        "target": "ES2022",
-        "module": "nodenext",
-        "moduleResolution": "nodenext",
-        "moduleDetection": "force",
-        "types": ["node"],
-        // Type Checking
         "strict": true,
+        "outDir": "bin",
+        "target": "es2016",
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "sourceMap": true,
+        "experimentalDecorators": true,
+        "pretty": true,
         "noFallthroughCasesInSwitch": true,
         "noImplicitReturns": true,
-        "skipLibCheck": true
+        "forceConsistentCasingInFileNames": true
     },
-    "files": [
-        "simple/index.ts"
-    ]
+    "files": ["index.ts"]
 }

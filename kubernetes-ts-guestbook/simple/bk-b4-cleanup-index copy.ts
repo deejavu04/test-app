@@ -7,7 +7,7 @@ const config = new pulumi.Config();
 const isMinikube = config.getBoolean("isMinikube");
 
 // =============================================================================
-// Create Monitoring Namespace to host monitoring-specific objects
+// MONITORING NAMESPACE
 // =============================================================================
 
 const monitoringNs = new k8s.core.v1.Namespace("monitoring", {
@@ -15,7 +15,7 @@ const monitoringNs = new k8s.core.v1.Namespace("monitoring", {
 });
 
 // =============================================================================
-// Deploy Prometheus Operator (via Helm - kube-prometheus-stack)
+// PROMETHEUS OPERATOR (via Helm - kube-prometheus-stack)
 // =============================================================================
 
 const prometheusStack = new k8s.helm.v3.Release("kube-prometheus-stack", {
@@ -34,9 +34,8 @@ const prometheusStack = new k8s.helm.v3.Release("kube-prometheus-stack", {
                 serviceMonitorNamespaceSelector: {},
             },
         },
-        // Set to false - will deploy Grafana directly with Kubernetes resources for more explicit control
         grafana: {
-            enabled: false,
+            enabled: false, // We deploy Grafana separately below for explicit control
         },
         alertmanager: {
             enabled: false,
@@ -45,7 +44,7 @@ const prometheusStack = new k8s.helm.v3.Release("kube-prometheus-stack", {
 });
 
 // =============================================================================
-// Deploy Redis Leader - Backend Deployment and Service
+// REDIS LEADER
 // =============================================================================
 
 const redisLeaderLabels = { app: "redis-leader" };
@@ -88,7 +87,7 @@ const redisLeaderService = new k8s.core.v1.Service("redis-leader", {
 });
 
 // =============================================================================
-// Deploy Redis Replica - Backend Deployment and Service
+// REDIS REPLICA
 // =============================================================================
 
 const redisReplicaLabels = { app: "redis-replica" };
@@ -132,7 +131,7 @@ const redisReplicaService = new k8s.core.v1.Service("redis-replica", {
 });
 
 // =============================================================================
-// Deploy Frontend - Deployment and Service
+// FRONTEND
 // =============================================================================
 
 const frontendLabels = { app: "frontend" };
@@ -151,6 +150,13 @@ const frontendDeployment = new k8s.apps.v1.Deployment("frontend", {
                         env: [{ name: "GET_HOSTS_FROM", value: "dns" }],
                         ports: [{ containerPort: 80, name: "http" }],
                     },
+                    // {
+                    //     name: "apache-exporter",
+                    //     image: "lusotycoon/apache-exporter:v1.0.8",
+                    //     resources: { requests: { cpu: "50m", memory: "32Mi" } },
+                    //     args: ["--scrape_uri=http://localhost:80/server-status?auto"],
+                    //     ports: [{ containerPort: 9117, name: "metrics" }],
+                    // },
                 ],
             },
         },
@@ -165,6 +171,7 @@ const frontendService = new k8s.core.v1.Service("frontend", {
         type: isMinikube ? "ClusterIP" : "LoadBalancer",
         ports: [
             { port: 80, targetPort: 80, name: "http" }
+            // { port: 9117, targetPort: 9117, name: "metrics" }
         ],
         selector: frontendDeployment.spec.template.metadata.labels,
     },
@@ -179,8 +186,29 @@ if (isMinikube) {
 }
 
 // =============================================================================
-// Create Servive Monitor for redis
+// SERVICE MONITORS
 // =============================================================================
+
+// const frontendServiceMonitor = new k8s.apiextensions.CustomResource("frontend-service-monitor", {
+//     apiVersion: "monitoring.coreos.com/v1",
+//     kind: "ServiceMonitor",
+//     metadata: {
+//         name: "frontend-monitor",
+//         namespace: monitoringNs.metadata.name,
+//         labels: { release: "kube-prometheus-stack" },
+//     },
+//     spec: {
+//         namespaceSelector: { matchNames: ["default"] },
+//         selector: { matchLabels: { app: "frontend" } },
+//         endpoints: [
+//             {
+//                 port: "http",
+//                 interval: "15s",
+//                 path: "/metrics",
+//             },
+//         ],
+//     },
+// }, { dependsOn: [prometheusStack] });
 
 const redisLeaderServiceMonitor = new k8s.apiextensions.CustomResource("redis-leader-service-monitor", {
     apiVersion: "monitoring.coreos.com/v1",
@@ -225,7 +253,7 @@ const redisReplicaServiceMonitor = new k8s.apiextensions.CustomResource("redis-r
 }, { dependsOn: [prometheusStack] });
 
 // =============================================================================
-// Blackbox Exporter (for HTTP probe monitoring of frontend)
+// BLACKBOX EXPORTER (for HTTP probe monitoring of frontend)
 // =============================================================================
 
 const blackboxExporterLabels = { app: "blackbox-exporter" };
@@ -295,7 +323,7 @@ const blackboxExporterService = new k8s.core.v1.Service("blackbox-exporter", {
     },
 });
 
-// ServiceMonitor for the blackbox-exporter
+// ServiceMonitor for the blackbox-exporter itself
 const blackboxServiceMonitor = new k8s.apiextensions.CustomResource("blackbox-exporter-service-monitor", {
     apiVersion: "monitoring.coreos.com/v1",
     kind: "ServiceMonitor",
@@ -343,15 +371,46 @@ const frontendProbe = new k8s.apiextensions.CustomResource("frontend-probe", {
     },
 }, { dependsOn: [prometheusStack, blackboxExporterDeployment] });
 
+// =============================================================================
+// PROMETHEUS SERVICE (reference from Helm release)
+// =============================================================================
+
+// const prometheusService = k8s.core.v1.Service.get("prometheus-svc",
+//     pulumi.interpolate`${monitoringNs.metadata.name}/kube-prometheus-stack-prometheus`,
+//     { dependsOn: [prometheusStack] },
+// );
 
 // =============================================================================
-// Deploy Grafana and create Dashboards
+// GRAFANA
 // =============================================================================
 
-// Dynamically resolve Prometheus service URL from the Helm release name & namespace (used for grafana datasource url)
+// Dynamically resolve the Prometheus service URL from the Helm release name + namespace
+
+// const promSvc = k8s.core.v1.Service.get("prometheus-svc",
+//     pulumi.interpolate`${monitoringNs.metadata.name}/kube-prometheus-stack-prometheus`,
+//     { dependsOn: [prometheusStack] },
+// );
 const promInternalUrl = pulumi.interpolate`http://${prometheusStack.name}-prometheus.${monitoringNs.metadata.name}:9090`;
 
-// Set Grafana Guestbook Application Dashboard configs for Frontend and Backend Services
+// const grafanaDatasourceConfig = new k8s.core.v1.ConfigMap("grafana-datasources", {
+//     metadata: {
+//         name: "grafana-datasources",
+//         namespace: monitoringNs.metadata.name,
+//     },
+//     data: {
+//         "datasources.yaml": `
+// apiVersion: 1
+// datasources:
+//   - name: Prometheus
+//     type: prometheus
+//     access: proxy
+//     url: http://kube-prometheus-stack-758d-prometheus.monitoring:9090/
+//     isDefault: true
+//     editable: true
+// `,
+//     },
+// });
+
 const grafanaDatasourceConfig = new k8s.core.v1.ConfigMap("grafana-datasources", {
     metadata: {
         name: "grafana-datasources",
@@ -466,7 +525,6 @@ const grafanaDashboardJson = new k8s.core.v1.ConfigMap("grafana-dashboard-guestb
     },
 });
 
-// Deploy Grafana
 const grafanaLabels = { app: "grafana" };
 const grafanaDeployment = new k8s.apps.v1.Deployment("grafana", {
     metadata: {
@@ -550,4 +608,5 @@ if (isMinikube) {
 
 export const grafanaAdminUser = "admin";
 export const grafanaAdminPassword = "admin";
+// export const prometheusUrl = "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090";
 export const prometheusUrl = "http://localhost:9090"
