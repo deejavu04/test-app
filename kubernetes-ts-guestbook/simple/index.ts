@@ -4,7 +4,8 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 const config = new pulumi.Config();
-const isMinikube = config.getBoolean("isMinikube");
+const isMinikube = config.getBoolean("isMinikube") || false;
+console.log("isMinikube =", isMinikube);
 
 // =============================================================================
 // Create Monitoring Namespace to host monitoring-specific objects
@@ -34,7 +35,7 @@ const prometheusStack = new k8s.helm.v3.Release("kube-prometheus-stack", {
                 serviceMonitorNamespaceSelector: {},
             },
         },
-        // Set to false - will deploy Grafana directly with Kubernetes resources for more explicit control
+        // Set to false - will deploy Grafana directly with Kubernetes resources to get more control
         grafana: {
             enabled: false,
         },
@@ -466,7 +467,7 @@ const grafanaDashboardJson = new k8s.core.v1.ConfigMap("grafana-dashboard-guestb
     },
 });
 
-// Deploy Grafana
+// Grafana deployment
 const grafanaLabels = { app: "grafana" };
 const grafanaDeployment = new k8s.apps.v1.Deployment("grafana", {
     metadata: {

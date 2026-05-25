@@ -17,7 +17,7 @@ The stack deploys:
 
 - [Pulumi CLI](https://www.pulumi.com/docs/get-started/install/)
 - [Node.js](https://nodejs.org/) (v18+)
-- A running Kubernetes cluster (e.g., Minikube, EKS, GKE, AKS)
+- A running Kubernetes cluster (e.g., Minikube)
 - `kubectl` configured to access your cluster
 - Helm (used internally by Pulumi for the kube-prometheus-stack chart)
 
